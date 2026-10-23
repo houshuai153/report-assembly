@@ -1,0 +1,10 @@
+# 数据契约 / 强类型校验
+pydantic>=2.0
+
+# Web 审核工作台（app/api/）
+fastapi>=0.110
+uvicorn>=0.29
+
+# PostgreSQL 持久化
+sqlalchemy>=2.0
+psycopg[binary]>=3.1

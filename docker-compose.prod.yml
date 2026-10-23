@@ -1,0 +1,57 @@
+# 生产：app + PostgreSQL(pgvector) + Caddy（自动 HTTPS）。
+#
+# 先复制 .env.example 为 .env 并填好 DOMAIN / APP_PASSWORD / APP_SECRET，再：
+#   docker compose -f docker-compose.prod.yml up -d --build
+# 访问 https://${DOMAIN}
+
+services:
+  app:
+    build: .
+    environment:
+      - DATABASE_URL=postgresql+psycopg://report:report@db:5432/report_assembly
+      - APP_PASSWORD=${APP_PASSWORD:?请在 .env 设置 APP_PASSWORD}
+      - APP_SECRET=${APP_SECRET:?请在 .env 设置 APP_SECRET}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-mock-llm-1}
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: report
+      POSTGRES_PASSWORD: report
+      POSTGRES_DB: report_assembly
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U report -d report_assembly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    # 注意：不暴露 5432 到公网
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

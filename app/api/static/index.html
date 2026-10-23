@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>报告初稿自动组装 · 审核工作台</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --line: #e3e6ea;
+    --text: #1f2328; --muted: #6a737d; --brand: #2563eb;
+    --ok: #16a34a; --warn: #d97706; --danger: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { background: var(--panel); border-bottom: 1px solid var(--line);
+           padding: 16px 24px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 12px; margin: 0; }
+  button { cursor: pointer; border: 1px solid var(--line); background: var(--panel);
+           color: var(--text); border-radius: 6px; padding: 6px 12px; font-size: 13px; }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  main { display: grid; grid-template-columns: 240px 1fr; gap: 16px; padding: 16px 24px; }
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  aside .report-item { padding: 8px; border-radius: 6px; cursor: pointer; margin-bottom: 6px; }
+  aside .report-item:hover { background: #f0f4ff; }
+  aside .report-item.active { background: #e8efff; }
+  .detail { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 20px; }
+  .empty { color: var(--muted); padding: 60px; text-align: center; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+  .st-ai_drafted, .st-pending_review { background: #fef3c7; color: #92400e; }
+  .st-under_review { background: #dbeafe; color: #1e40af; }
+  .st-approved { background: #dcfce7; color: #166534; }
+  .st-rejected { background: #fee2e2; color: #991b1b; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0 20px; font-size: 13px; }
+  th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; }
+  th { background: #fafbfc; }
+  .section { border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+  .section h3 { margin: 0 0 6px; font-size: 15px; }
+  .provenance { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .provenance code { background: #f0f1f3; padding: 1px 5px; border-radius: 4px; }
+  .section .text { white-space: pre-wrap; font-size: 13px; line-height: 1.6; margin-bottom: 10px; }
+  .section .actions { display: flex; gap: 8px; }
+  .toolbar { margin: 12px 0; display: flex; gap: 8px; flex-wrap: wrap; }
+  .error { background: #fee2e2; color: #991b1b; padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 13px; }
+  .audit-entry { display: flex; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }
+  .audit-entry .act { font-family: monospace; min-width: 180px; }
+  .audit-entry .meta { color: var(--muted); }
+  .kv { font-size: 13px; }
+  .kv b { color: var(--muted); font-weight: 600; }
+  #login-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4);
+                   display: none; align-items: center; justify-content: center; z-index: 10; }
+  .login-box { background: var(--panel); padding: 28px; border-radius: 10px; width: 320px;
+               box-shadow: 0 10px 30px rgba(0,0,0,.2); }
+  .login-box h2 { margin: 0 0 4px; }
+  .login-box input { width: 100%; padding: 8px; margin: 12px 0; border: 1px solid var(--line);
+                     border-radius: 6px; font-size: 14px; }
+  .login-box button { width: 100%; }
+  .login-box .error { display: block; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>报告初稿自动组装 · 审核工作台</h1>
+  <p class="sub">数据治理 → 确定性计算 → 受控生成 → 合规锚定（demo）</p>
+  <button class="primary" id="create-btn">生成演示报告</button>
+</header>
+
+<div id="login-overlay">
+  <div class="login-box">
+    <h2>登录</h2>
+    <p class="sub">输入访问密码（默认 demo）</p>
+    <input id="login-password" type="password" placeholder="密码" autocomplete="current-password">
+    <button id="login-submit" class="primary">登录</button>
+    <div id="login-error" class="error" style="display:none;"></div>
+  </div>
+</div>
+
+<main>
+  <aside id="report-list">
+    <div style="color:var(--muted);font-size:12px;margin-bottom:8px;">报告列表</div>
+  </aside>
+
+  <section class="detail" id="detail">
+    <div class="empty">点击左上角「生成演示报告」开始 —— 会走完整四层流程：治理 → 计算 → 检索 → 生成 → 审核。</div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const API = '';
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  let data = {};
+  try { data = await res.json(); } catch (e) {}
+  if (!res.ok) {
+    const err = new Error(data.detail || res.statusText);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+const STATE_CN = {
+  ai_drafted: 'AI 初稿', pending_review: '待审核', under_review: '审核中',
+  revision_required: '需修改', approved: '已批准', rejected: '已拒绝',
+};
+
+async function createReport() {
+  const btn = $('create-btn');
+  btn.disabled = true;
+  try {
+    const r = await api('/reports', { method: 'POST' });
+    await loadReports(r.report_id);
+    await loadReport(r.report_id);
+  } catch (e) { showError(e.message); }
+  finally { btn.disabled = false; }
+}
+
+async function loadReports(activeId) {
+  const list = await api('/reports');
+  const box = $('report-list');
+  box.innerHTML = '<div style="color:var(--muted);font-size:12px;margin-bottom:8px;">报告列表</div>';
+  for (const r of list) {
+    const div = document.createElement('div');
+    div.className = 'report-item' + (r.report_id === activeId ? ' active' : '');
+    div.innerHTML = `<div>${r.study_id}</div><div style="font-size:11px;color:var(--muted)">${STATE_CN[r.state] || r.state}</div>`;
+    div.onclick = () => { loadReports(r.report_id); loadReport(r.report_id); };
+    box.appendChild(div);
+  }
+}
+
+async function loadReport(id) {
+  try {
+    const r = await api('/reports/' + id);
+    render(r);
+  } catch (e) { showError(e.message); }
+}
+
+function render(r) {
+  const d = $('detail');
+  const badge = `<span class="badge st-${r.state}">${STATE_CN[r.state] || r.state}</span>`;
+  const meta = r.metadata;
+  const md = [
+    ['研究编号', meta.study_id], ['分析物', meta.analyte], ['基质', meta.matrix],
+    ['物种', meta.species], ['方法平台', meta.method_platform], ['报告类型', meta.report_type],
+  ].map(([k, v]) => `<b>${k}</b>: ${v}`).join(' &nbsp;·&nbsp; ');
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <h2 style="margin:0;">报告初稿 <span style="font-size:14px;color:var(--muted)">${r.study_id}</span></h2>
+      ${badge}
+    </div>
+    <div class="kv" style="margin-top:8px;">${md}</div>
+    <div class="toolbar">
+      <button onclick="claim('${r.report_id}')">认领审核</button>
+      <button onclick="approve('${r.report_id}')">QA 批准</button>
+      <button onclick="showAudit('${r.report_id}')">查看审计链</button>
+      <button onclick="verifyAudit('${r.report_id}')">验证审计链</button>
+    </div>
+    <div id="err"></div>`;
+
+  html += `<h3>PK 参数（确定性计算）</h3>` + pkTable(r.pk_by_subject);
+  html += `<h3>质控统计（确定性计算）</h3>` + qcTable(r.qc_summary);
+  html += `<h3>叙述章节（AI 受控生成）</h3>`;
+
+  for (const [key, sec] of Object.entries(r.sections)) {
+    const status = sec.status === 'edited' ? '<span style="color:var(--warn)">已修改</span>' : '待审核';
+    html += `
+      <div class="section">
+        <h3>${sec.title} <span style="font-size:12px;color:var(--muted)">${status}</span></h3>
+        <div class="provenance">
+          溯源来源 <code>${sec.selected_sources.join(', ')}</code> ·
+          模型 <code>${sec.model_version}</code> ·
+          数据版本 <code>${sec.input_data_version}</code>
+        </div>
+        <div class="text">${escapeHtml(sec.text)}</div>
+        <div class="actions">
+          <button onclick="acceptSection('${r.report_id}','${key}')">接受</button>
+          <button onclick="editSection('${r.report_id}','${key}')">修改</button>
+          <button onclick="rejectSection('${r.report_id}','${key}')">拒绝</button>
+        </div>
+      </div>`;
+  }
+
+  d.innerHTML = html;
+}
+
+function pkTable(pk) {
+  const headers = ['Subject', 'Cmax (ng/mL)', 'Tmax (h)', 'AUC_last', 'AUC_inf', 'T1/2 (h)'];
+  let h = '<table><tr>' + headers.map(x => `<th>${x}</th>`).join('') + '</tr>';
+  for (const [subj, p] of Object.entries(pk)) {
+    h += `<tr><td>${subj}</td><td>${p.Cmax}</td><td>${p.Tmax}</td><td>${p.AUC_last}</td><td>${p.AUC_inf ?? '—'}</td><td>${p.T1_2 ?? '—'}</td></tr>`;
+  }
+  return h + '</table>';
+}
+
+function qcTable(qc) {
+  const rows = [
+    ['总样本数', qc.total_samples], ['低于 LLOQ (BLQ)', qc.below_loq],
+    ['可定量样本', qc.measurable], ['分析批次', qc.runs], ['受试者数', qc.subjects], ['LLOQ (ng/mL)', qc.lloq],
+  ];
+  return '<table><tr><th>指标</th><th>值</th></tr>' +
+    rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('') + '</table>';
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+
+function showError(msg) {
+  const d = $('detail');
+  const err = $('err');
+  if (err) { err.innerHTML = `<div class="error">${escapeHtml(msg)}</div>`; }
+  else { d.innerHTML = `<div class="error">${escapeHtml(msg)}</div>`; }
+}
+
+async function act(fn, id) {
+  try { await fn(); await loadReport(id); await loadReports(id); }
+  catch (e) { showError(e.message); }
+}
+
+function claim(id) { act(() => api('/reports/' + id + '/claim', { method: 'POST' }), id); }
+function approve(id) { act(() => api('/reports/' + id + '/approve', { method: 'POST' }), id); }
+function acceptSection(id, s) { act(() => api(`/reports/${id}/sections/${s}/accept`, { method: 'POST' }), id); }
+function editSection(id, s) {
+  const cur = '';
+  const text = prompt('输入新的章节文本：', cur);
+  if (text === null) return;
+  act(() => api(`/reports/${id}/sections/${s}/edit`, { method: 'POST', body: JSON.stringify({ text }) }), id);
+}
+function rejectSection(id, s) {
+  const reason = prompt('拒绝原因：', '');
+  if (reason === null) return;
+  act(() => api(`/reports/${id}/sections/${s}/reject`, { method: 'POST', body: JSON.stringify({ reason }) }), id);
+}
+
+async function showAudit(id) {
+  const entries = await api('/reports/' + id + '/audit');
+  const html = '<h3>审计链（哈希链，append-only）</h3>' + entries.map(e => `
+    <div class="audit-entry">
+      <span class="act">${e.action}</span>
+      <span>actor=${e.actor}</span>
+      <span class="meta">${e.object_type}/${e.object_id}${e.tool ? ' · ' + e.tool : ''}</span>
+      <span class="meta">${e.hash}</span>
+    </div>`).join('');
+  const d = $('detail');
+  d.insertAdjacentHTML('beforeend', `<div id="audit-panel">${html}</div>`);
+}
+
+async function verifyAudit(id) {
+  const v = await api('/reports/' + id + '/audit/verify');
+  alert(`审计链校验：${v.ok ? '✅ 通过' : '❌ ' + v.message}（共 ${v.count} 条记录）`);
+}
+
+$('create-btn').addEventListener('click', createReport);
+$('login-submit').addEventListener('click', doLogin);
+$('login-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+
+function showLogin() { $('login-overlay').style.display = 'flex'; }
+async function doLogin() {
+  const pwd = $('login-password').value;
+  $('login-error').style.display = 'none';
+  try {
+    await api('/login', { method: 'POST', body: JSON.stringify({ password: pwd }) });
+    $('login-overlay').style.display = 'none';
+    await loadReports();
+  } catch (e) { $('login-error').textContent = e.message; $('login-error').style.display = 'block'; }
+}
+
+async function init() {
+  try { await loadReports(); }
+  catch (e) { if (e.status === 401) showLogin(); }
+}
+init();
+</script>
+</body>
+</html>

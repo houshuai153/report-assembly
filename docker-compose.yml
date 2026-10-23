@@ -1,0 +1,50 @@
+# 开发/本地：app（Web 审核工作台）+ PostgreSQL(pgvector)。
+#
+#   docker compose up --build          # 起 app + db，浏览器打开 http://localhost:8000
+#   docker compose run --rm app python demo_run.py   # 跑命令行 demo
+
+services:
+  app:
+    build: .
+    container_name: report-assembly
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+psycopg://report:report@db:5432/report_assembly
+      - APP_PASSWORD=${APP_PASSWORD:-demo}
+      - APP_SECRET=${APP_SECRET:-change-me-in-prod}
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL_ID=${LLM_MODEL_ID:-mock-llm-1}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: report-assembly-db
+    environment:
+      POSTGRES_USER: report
+      POSTGRES_PASSWORD: report
+      POSTGRES_DB: report_assembly
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U report -d report_assembly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: report-assembly-redis
+    profiles: ["prod"]
+    ports:
+      - "6379:6379"
+    # 为异步任务队列（Celery）预留
+
+volumes:
+  pgdata:
