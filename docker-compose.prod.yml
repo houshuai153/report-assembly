@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
 
   db:
-    image: pgvector/pgvector:pg17
+    image: postgres:16-alpine
     environment:
       POSTGRES_USER: report
       POSTGRES_PASSWORD: report

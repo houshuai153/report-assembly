@@ -87,7 +87,7 @@ docker compose run --rm app python demo_run.py     # 跑命令行 demo（无需�
 ```
 
 - `app`：Web 审核工作台（FastAPI + 单页前端，默认命令）
-- `db`：`pgvector/pgvector:pg17` —— 业务库 + 审计链 + 向量检索同库
+- `db`：`postgres:16-alpine` —— 业务库 + 审计链（当前向量检索仍在内存，接 pgvector 时再换镜像）
 - `redis`（`--profile prod`）：为异步任务队列（Celery）预留
 - 公网部署（域名 + HTTPS + Caddy）见 [DEPLOY.md](DEPLOY.md)
 

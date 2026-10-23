@@ -22,7 +22,9 @@ services:
         condition: service_healthy
 
   db:
-    image: pgvector/pgvector:pg17
+    # 当前 demo 向量检索仍在内存（词频），数据库只用到 JSONB + 普通 SQL，
+    # 故用官方 postgres；后续接 pgvector 向量检索时再换 pgvector/pgvector 镜像
+    image: postgres:16-alpine
     container_name: report-assembly-db
     environment:
       POSTGRES_USER: report
