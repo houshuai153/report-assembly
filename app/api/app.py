@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from app.compliance.audit_chain import AuditEntry
 from app.compliance.rbac import Role, User
 from app.config import Config
+from app.export.service import export_report
 from app.generation.assembler import Assembler
 from app.generation.deterministic import compute
 from app.generation.narrative.llm import make_llm_client
@@ -190,6 +191,20 @@ def create_app() -> FastAPI:
     @protected.get("/reports/{report_id}")
     def get_one_report(report_id: str):
         return _get_or_404(report_id)
+
+    @protected.get("/reports/{report_id}/export")
+    def export_document(report_id: str, format: str = "docx"):
+        report = _get_or_404(report_id)
+        try:
+            data, mime = export_report(report, format)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        ext = format.lower() if format.lower() in ("docx", "pdf") else "docx"
+        return Response(
+            content=data,
+            media_type=mime,
+            headers={"Content-Disposition": f'attachment; filename="{report["study_id"]}.{ext}"'},
+        )
 
     # ---------------- 审核动作（受保护） ----------------
     @protected.post("/reports/{report_id}/claim")

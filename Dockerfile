@@ -9,8 +9,9 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # 先装依赖（利用 Docker 层缓存，源码改动不重装依赖）
+# 国内服务器用阿里云 PyPI 镜像加速；境外部署可去掉 -i 参数
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt
 
 # 拷贝源码与数据
 COPY app ./app

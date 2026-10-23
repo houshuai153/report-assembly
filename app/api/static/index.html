@@ -162,6 +162,8 @@ function render(r) {
       <button onclick="approve('${r.report_id}')">QA 批准</button>
       <button onclick="showAudit('${r.report_id}')">查看审计链</button>
       <button onclick="verifyAudit('${r.report_id}')">验证审计链</button>
+      <button onclick="exportReport('${r.report_id}','docx')">导出 Word</button>
+      <button onclick="exportReport('${r.report_id}','pdf')">导出 PDF</button>
     </div>
     <div id="err"></div>`;
 
@@ -256,6 +258,10 @@ async function showAudit(id) {
 async function verifyAudit(id) {
   const v = await api('/reports/' + id + '/audit/verify');
   alert(`审计链校验：${v.ok ? '✅ 通过' : '❌ ' + v.message}（共 ${v.count} 条记录）`);
+}
+
+function exportReport(id, fmt) {
+  window.location.href = '/reports/' + id + '/export?format=' + fmt;
 }
 
 $('create-btn').addEventListener('click', createReport);

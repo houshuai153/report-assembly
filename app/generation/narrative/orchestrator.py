@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict
 
 from app.compliance.audit_chain import AuditChain
+from app.compliance.pii_scanner import redact
 from app.governance.contracts import GovernedDataset
 from app.retrieval.hybrid_search import Retriever
 from .llm import MockLLMClient, OpenAICompatibleClient
@@ -67,11 +68,24 @@ class SectionOrchestrator:
 
         # 3. 调用 LLM，强制结构化输出
         response = self.llm_client.generate(prompt, response_format="json_object")
+        text = response["text"]
+
+        # 3.5 输出脱敏：命中 PII 则替换为 *** 并写审计
+        text, pii_hits = redact(text)
+        if pii_hits:
+            self.audit.append(
+                action="PII_DETECTED",
+                actor=user_id,
+                object_type="section",
+                object_id=section_type,
+                payload_hash=self.audit.hash_text(text),
+                metadata={"section": section_type, "types": sorted({h["type"] for h in pii_hits})},
+            )
 
         # 4. 生成溯源记录
         draft = SectionDraft(
             section_type=section_type,
-            text=response["text"],
+            text=text,
             selected_sources=response["source_ids"],
             model_version=self.llm_client.model_id,
             input_data_version=dataset.data_version,

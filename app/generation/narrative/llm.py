@@ -1,14 +1,18 @@
-"""LLM 客户端抽象 + mock 实现 + 可选 OpenAI 兼容实现。
+"""LLM 客户端抽象 + mock 实现 + OpenAI 兼容实现。
 
 核心设计：
   - LLM 只做"选择 + 组装"，不做事实生产；
   - 输出必须是结构化 JSON（{"text": ..., "source_ids": [...]}），
-    LLM 说了什么与系统接受了什么之间有明确的 schema 边界。
+    解析失败即抛异常，由上层降级到人工，不进入报告。
+
+生产接入：设置 LLM_PROVIDER=openai_compatible + LLM_BASE_URL/LLM_API_KEY/LLM_MODEL_ID，
+指向私有化部署（vLLM / Qwen 等 OpenAI 兼容接口），数据不出域。
 """
 
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 from pydantic import BaseModel
@@ -72,24 +76,36 @@ class MockLLMClient(BaseModel):
 class OpenAICompatibleClient(BaseModel):
     """OpenAI 兼容的私有化部署接口（内网合规，数据不出域）。
 
-    使用标准 HTTP + JSON mode，强制结构化输出；解析失败即抛出，
-    由上层降级到人工，不进入报告。
+    超时 + 重试 + 结构化输出校验；解析失败即抛异常（由上层降级到人工）。
     """
 
     model_id: str
     base_url: str
     api_key: str
+    timeout: int = 120
+    max_retries: int = 2
 
     def generate(self, prompt: dict[str, Any], response_format: str | None = None) -> dict[str, Any]:
-        import urllib.request
-
         payload = {
             "model": self.model_id,
-            "messages": [
-                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)}
-            ],
+            "messages": [{"role": "user", "content": self._format_prompt(prompt)}],
             "response_format": {"type": "json_object"},
+            "temperature": 0.0,
         }
+        last_err: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                data = self._post(payload)
+                return self._parse(data)
+            except Exception as exc:  # noqa: BLE001
+                last_err = exc
+                if attempt < self.max_retries:
+                    time.sleep(1 * (attempt + 1))
+        raise RuntimeError(f"LLM 调用失败（已重试 {self.max_retries} 次）：{last_err}")
+
+    def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+        import urllib.request
+
         req = urllib.request.Request(
             f"{self.base_url.rstrip('/')}/v1/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -98,15 +114,43 @@ class OpenAICompatibleClient(BaseModel):
                 "Content-Type": "application/json",
             },
         )
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    @staticmethod
+    def _parse(data: dict[str, Any]) -> dict[str, Any]:
         content = data["choices"][0]["message"]["content"]
-        return json.loads(content)
+        obj = json.loads(content)
+        text = obj.get("text")
+        sources = obj.get("source_ids", [])
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("LLM 返回缺少有效 text 字段")
+        if not isinstance(sources, list):
+            sources = []
+        return {"text": text, "source_ids": sources}
+
+    @staticmethod
+    def _format_prompt(prompt: dict[str, Any]) -> str:
+        section_type = prompt["section_type"]
+        variables = prompt["variables"]
+        candidates = prompt["candidates"]
+        cand_lines = "\n".join(f"- [{c['id']}] {c['text']}" for c in candidates) or "（无）"
+        return (
+            f"你是报告初稿组装助手。请为「{section_type}」章节生成一段叙述文本。\n\n"
+            "规则：\n"
+            "1. 只能从下方「已批准文本候选」中选择并拼接，禁止编造任何数值或事实；\n"
+            "2. 所有数值必须来自「研究变量」，不得篡改；\n"
+            '3. 只返回 JSON，格式：{"text": "叙述文本", "source_ids": ["用到的候选id"]}。\n\n'
+            f"研究变量：\n{json.dumps(variables, ensure_ascii=False)}\n\n"
+            f"已批准文本候选：\n{cand_lines}"
+        )
 
 
 def make_llm_client(cfg: LLMConfig):
     """根据配置构建 LLM 客户端。默认 mock，零外部依赖。"""
     if cfg.provider == "openai_compatible":
+        if not cfg.base_url or not cfg.model_id:
+            raise ValueError("openai_compatible 模式需要设置 LLM_BASE_URL 和 LLM_MODEL_ID")
         return OpenAICompatibleClient(
             model_id=cfg.model_id, base_url=cfg.base_url, api_key=cfg.api_key
         )
